@@ -2,12 +2,15 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { XtermView, XtermRef } from './XtermView';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, Terminal as TerminalIcon, Wifi, WifiOff, Settings as SettingsIcon, Shield, Code, UserCheck, Cpu } from 'lucide-react';
+import { Loader2, Terminal as TerminalIcon, Wifi, WifiOff, Settings as SettingsIcon, Shield, Code, UserCheck, Cpu, Copy } from 'lucide-react';
 import { TerminalSettings } from './TerminalSettings';
 import { TerminalConfig, AgentType } from '@shared/types';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 interface TerminalInterfaceProps {
   terminalId: string;
   name: string;
+  compact?: boolean;
 }
 const AgentIcon = ({ type }: { type: AgentType }) => {
   switch (type) {
@@ -17,7 +20,7 @@ const AgentIcon = ({ type }: { type: AgentType }) => {
     default: return <Cpu className="w-3 h-3" />;
   }
 };
-export function TerminalInterface({ terminalId, name }: TerminalInterfaceProps) {
+export function TerminalInterface({ terminalId, name, compact = false }: TerminalInterfaceProps) {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [config, setConfig] = useState<TerminalConfig | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -71,9 +74,7 @@ export function TerminalInterface({ terminalId, name }: TerminalInterfaceProps) 
     connect();
     return () => {
       isMountedRef.current = false;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -83,29 +84,42 @@ export function TerminalInterface({ terminalId, name }: TerminalInterfaceProps) 
       wsRef.current.send(data);
     }
   }, []);
+  const copyId = () => {
+    navigator.clipboard.writeText(terminalId);
+    toast.success("Node ID copied to clipboard");
+  };
   return (
-    <div className="flex flex-col h-full bg-black/40 backdrop-blur-sm border border-border rounded-lg overflow-hidden terminal-glow">
-      <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b border-border">
+    <div className={cn(
+      "flex flex-col h-full bg-black/40 backdrop-blur-sm border border-border rounded-lg overflow-hidden transition-all duration-300",
+      status === 'connected' ? "terminal-glow" : "opacity-80 shadow-none border-dashed"
+    )}>
+      <div className={cn(
+        "flex items-center justify-between bg-muted/50 border-b border-border",
+        compact ? "px-3 py-1.5" : "px-4 py-2"
+      )}>
         <div className="flex items-center gap-3">
-          <TerminalIcon className="w-4 h-4 text-primary" />
+          <TerminalIcon className={cn("text-primary", compact ? "w-3 h-3" : "w-4 h-4")} />
           <div className="flex flex-col">
-            <span className="text-sm font-mono font-medium leading-none">{config?.name || name}</span>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-tighter mt-1">{config?.agentType || 'system'}</span>
+            <span className={cn("font-mono font-medium leading-none", compact ? "text-xs" : "text-sm")}>{config?.name || name}</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-tighter mt-0.5">{config?.agentType || 'system'}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {config && (
+        <div className="flex items-center gap-1.5">
+          {!compact && config && (
             <Badge variant="outline" className="gap-1 h-6 border-primary/20 bg-primary/5 text-primary">
               <AgentIcon type={config.agentType} /> {config.agentType}
             </Badge>
           )}
           <div className="h-4 w-px bg-border mx-1" />
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={() => setIsSettingsOpen(true)}>
-            <SettingsIcon className="w-4 h-4" />
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary" onClick={copyId} title="Copy ID">
+            <Copy className="w-3.5 h-3.5" />
           </Button>
-          {status === 'connecting' && <Badge variant="outline" className="h-6 animate-pulse"><Loader2 className="w-3 h-3 animate-spin mr-1" /> Syncing</Badge>}
-          {status === 'connected' && <Badge variant="secondary" className="h-6 bg-emerald-500/10 text-emerald-500 border-emerald-500/20"><Wifi className="w-3 h-3 mr-1" /> Online</Badge>}
-          {status === 'error' && <Badge variant="destructive" className="h-6"><WifiOff className="w-3 h-3 mr-1" /> Offline</Badge>}
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary" onClick={() => setIsSettingsOpen(true)}>
+            <SettingsIcon className="w-3.5 h-3.5" />
+          </Button>
+          {status === 'connecting' && <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse ml-2" />}
+          {status === 'connected' && <div className="w-2 h-2 rounded-full bg-emerald-500 ml-2" />}
+          {status === 'error' && <div className="w-2 h-2 rounded-full bg-rose-500 ml-2" />}
         </div>
       </div>
       <div className="flex-1 min-h-0 bg-[#09090b]">

@@ -1,8 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
-import type { TerminalConfig, ExecutionRequest, AgentType } from '@shared/types';
+import type { TerminalConfig, ExecutionRequest, AgentType, ApiResponse } from '@shared/types';
+import { Env } from "./core-utils";
 export class GlobalDurableObject extends DurableObject {
     private sessions: Set<WebSocket> = new Set();
     private config: TerminalConfig | null = null;
+    private env: Env;
+    constructor(ctx: DurableObjectState, env: Env) {
+        super(ctx, env);
+        this.env = env;
+    }
     private async ensureConfig(): Promise<TerminalConfig> {
         if (this.config) return this.config;
         const stored = await this.ctx.storage.get<TerminalConfig>("config");
@@ -11,7 +17,7 @@ export class GlobalDurableObject extends DurableObject {
             return stored;
         }
         const defaultConfig: TerminalConfig = {
-            id: "unknown", // Will be set on first fetch or init
+            id: this.ctx.id.toString(),
             name: "New Agent",
             agentType: 'system',
             systemPrompt: "You are a helpful Synapse system agent.",
@@ -23,15 +29,13 @@ export class GlobalDurableObject extends DurableObject {
     }
     async fetch(request: Request): Promise<Response> {
         const url = new URL(request.url);
-        // Fix TS2488 by accessing as object or type assertion
         if (url.pathname.includes('/connect')) {
             const upgradeHeader = request.headers.get('Upgrade');
             if (!upgradeHeader || upgradeHeader !== 'websocket') {
                 return new Response('Expected Upgrade: websocket', { status: 426 });
             }
             const pair = new WebSocketPair();
-            const client = pair[0];
-            const server = pair[1];
+            const [client, server] = [pair[0], pair[1]];
             await this.handleWebSocket(server);
             return new Response(null, {
                 status: 101,
@@ -41,7 +45,7 @@ export class GlobalDurableObject extends DurableObject {
         if (url.pathname.includes('/config')) {
             if (request.method === 'GET') {
                 const config = await this.ensureConfig();
-                return Response.json({ success: true, data: config });
+                return Response.json({ success: true, data: config } satisfies ApiResponse<TerminalConfig>);
             }
             if (request.method === 'PUT') {
                 const updates = await request.json() as Partial<TerminalConfig>;
@@ -50,17 +54,16 @@ export class GlobalDurableObject extends DurableObject {
                 await this.ctx.storage.put("config", updated);
                 this.config = updated;
                 this.broadcast(`\r\n\x1b[35m[SYSTEM] Configuration updated: ${updated.agentType} mode active.\x1b[0m\r\n\x1b[32muser@synapse:~$\x1b[0m `);
-                return Response.json({ success: true, data: updated });
+                return Response.json({ success: true, data: updated } satisfies ApiResponse<TerminalConfig>);
             }
         }
         if (url.pathname.includes('/execute') && request.method === 'POST') {
             const body = await request.json() as ExecutionRequest;
             const config = await this.ensureConfig();
-            this.broadcast(`\r\n\x1b[34m[INCOMING] Request from ${body.callerId}:\x1b[0m ${body.prompt}\r\n`);
-            // Simulate AI Processing
-            const response = await this.simulateAgentResponse(config, body.prompt);
-            this.broadcast(`\x1b[36m[OUTGOING]\x1b[0m Sending response back to ${body.callerId}...\r\n\x1b[32muser@synapse:~$\x1b[0m `);
-            return Response.json({ success: true, data: response });
+            this.broadcast(`\r\n\x1b[35m[MESSAGED_BY] Node ${body.callerId.slice(0, 8)}:\x1b[0m ${body.prompt}\r\n`);
+            const response = await this.simulateAgentResponse(config, body.prompt, body.callerId);
+            this.broadcast(`\x1b[36m[REPLYING]\x1b[0m Sent response back to ${body.callerId.slice(0, 8)}...\r\n\x1b[32muser@synapse:~$\x1b[0m `);
+            return Response.json({ success: true, data: response } satisfies ApiResponse<string>);
         }
         return new Response('Not Found', { status: 404 });
     }
@@ -74,7 +77,7 @@ export class GlobalDurableObject extends DurableObject {
         this.sessions.add(ws);
         const config = await this.ensureConfig();
         ws.send(`\r\n\x1b[33m[SYNAPSE]\x1b[0m Node: ${config.name} (${config.agentType})\r\n`);
-        ws.send(`\x1b[90mPrompt: ${config.systemPrompt}\x1b[0m\r\n`);
+        ws.send(`\x1b[90mID: ${this.ctx.id.toString()}\x1b[0m\r\n`);
         ws.send(`\x1b[32muser@synapse:~$\x1b[0m `);
         let inputBuffer = '';
         ws.addEventListener('message', async (event) => {
@@ -99,6 +102,7 @@ export class GlobalDurableObject extends DurableObject {
     }
     private async processCommand(ws: WebSocket, command: string) {
         if (!command) return;
+        const config = await this.ensureConfig();
         if (command.startsWith('@')) {
             const parts = command.split(' ');
             const targetId = parts[0].substring(1);
@@ -107,37 +111,61 @@ export class GlobalDurableObject extends DurableObject {
                 ws.send(`\x1b[31mUsage: @[target-id] [message]\x1b[0m\r\n`);
                 return;
             }
-            ws.send(`\x1b[90mRouting to ${targetId} via Mesh Protocol...\x1b[0m\r\n`);
+            ws.send(`\x1b[90mRouting to ${targetId.slice(0, 8)} via Mesh Grid...\x1b[0m\r\n`);
             try {
-                // Cross-DO execution would normally use service bindings or fetch back to the worker
-                // Here we simulate the logic since GlobalDurableObject is our namespace
-                ws.send(`\x1b[32mMessage delivered. Awaiting response...\x1b[0m\r\n`);
+                const id = this.env.GlobalDurableObject.idFromName(targetId);
+                const stub = this.env.GlobalDurableObject.get(id);
+                const res = await stub.fetch(`http://do/api/terminal/${targetId}/execute`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        prompt,
+                        callerId: this.ctx.id.toString()
+                    } satisfies ExecutionRequest)
+                });
+                const result = await res.json() as ApiResponse<string>;
+                if (result.success) {
+                    ws.send(`\r\n\x1b[35m[RESPONSE from ${targetId.slice(0, 8)}]:\x1b[0m ${result.data}\r\n`);
+                } else {
+                    ws.send(`\x1b[31mExecution Failed: ${result.error}\x1b[0m\r\n`);
+                }
             } catch (e) {
-                ws.send(`\x1b[31mRouting Error: Target node ${targetId} unreachable.\x1b[0m\r\n`);
+                ws.send(`\x1b[31mRouting Error: Node ${targetId.slice(0, 8)} unreachable.\x1b[0m\r\n`);
             }
             return;
         }
-        const config = await this.ensureConfig();
-        if (command === 'help') {
-            ws.send('\x1b[36mCommands:\x1b[0m help, status, clear, whoami, @[target] [msg]\r\n');
-        } else if (command === 'status') {
-            ws.send(`\x1b[32m[OK]\x1b[0m Agent: ${config.name}\r\n`);
-            ws.send(`\x1b[32m[OK]\x1b[0m Type: ${config.agentType}\r\n`);
-        } else if (command === 'clear') {
-            ws.send('\x1b[2J\x1b[H');
-        } else {
-            ws.send(`Processing logic for: ${command}...\r\n`);
-            const response = await this.simulateAgentResponse(config, command);
-            ws.send(`\x1b[33m[${config.agentType.toUpperCase()}]\x1b[0m ${response}\r\n`);
+        switch (command) {
+            case 'help':
+                ws.send('\x1b[36mCommands:\x1b[0m help, status, clear, whoami, @[id] [msg]\r\n');
+                break;
+            case 'status':
+                ws.send(`\x1b[32m[OK]\x1b[0m Node: ${config.name}\r\n`);
+                ws.send(`\x1b[32m[OK]\x1b[0m Type: ${config.agentType}\r\n`);
+                ws.send(`\x1b[32m[OK]\x1b[0m Status: ${config.status}\r\n`);
+                break;
+            case 'whoami':
+                ws.send(`\x1b[36mNODE IDENTITY\x1b[0m\r\n`);
+                ws.send(`ID: ${this.ctx.id.toString()}\r\n`);
+                ws.send(`Role: ${config.agentType}\r\n`);
+                ws.send(`Prompt: ${config.systemPrompt}\r\n`);
+                break;
+            case 'clear':
+                ws.send('\x1b[2J\x1b[H');
+                break;
+            default:
+                const response = await this.simulateAgentResponse(config, command, 'user');
+                ws.send(`\x1b[33m[${config.agentType.toUpperCase()}]\x1b[0m ${response}\r\n`);
         }
     }
-    private async simulateAgentResponse(config: TerminalConfig, input: string): Promise<string> {
-        await new Promise(r => setTimeout(r, 600));
+    private async simulateAgentResponse(config: TerminalConfig, input: string, caller: string): Promise<string> {
+        await new Promise(r => setTimeout(r, 800));
+        const contextPrefix = caller !== 'user' ? `[Mesh Call from ${caller.slice(0, 8)}] ` : '';
         if (config.agentType === 'coder') {
-            return `I've analyzed the request. Based on the system prompt "${config.systemPrompt}", I recommend refactoring the logic using a Map for O(1) lookups.`;
+            return `${contextPrefix}I've processed the request. Recommendation: Use the provided context to implement a recursive strategy for ${input}.`;
+        } else if (config.agentType === 'security') {
+            return `${contextPrefix}Security audit for "${input}" initiated. No critical vulnerabilities detected in current buffer.`;
         } else if (config.agentType === 'reviewer') {
-            return `Code review complete. The implementation of "${input}" looks solid, but ensure you handle null pointers in the edge cases.`;
+            return `${contextPrefix}Review complete. Logical flow for "${input}" is sound, but consider adding telemetry.`;
         }
-        return `Acknowledged. Processing "${input}" within the Synapse framework.`;
+        return `${contextPrefix}Command "${input}" acknowledged by Synapse Core.`;
     }
 }
