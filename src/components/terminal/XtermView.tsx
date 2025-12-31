@@ -22,12 +22,10 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
   const timersRef = useRef<number[]>([]);
   const roRef = useRef<ResizeObserver | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   const addTimer = (cb: () => void, delay: number) => {
     const id = window.setTimeout(cb, delay) as unknown as number;
     timersRef.current.push(id);
   };
-
   useImperativeHandle(ref, () => ({
     write: (data: string) => {
       if (!isDisposedRef.current && terminalInstance.current) {
@@ -66,20 +64,12 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
     terminalInstance.current = term;
     fitAddonInstance.current = fit;
     const performFit = () => {
-      if (
-        isDisposedRef.current ||
-        !containerRef.current ||
-        !fitAddonInstance.current ||
-        !terminalInstance.current ||
-        !(terminalInstance.current as any)._core // Internal check for core initialization
-      ) return;
-
+      if (isDisposedRef.current || !containerRef.current || !fitAddonInstance.current || !terminalInstance.current) return;
       const core = (terminalInstance.current as any)._core;
-      if (!core || !core._viewport || !core._viewport._renderMetrics) {
-        console.warn('Terminal not ready for fit');
+      // DEEP INSPECTION: Ensure render service and dimensions are initialized
+      if (!core || !core._renderService || !core._renderService.dimensions) {
         return;
       }
-
       try {
         const termElement = (terminalInstance.current as any).element;
         if (
@@ -91,16 +81,14 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
           fitAddonInstance.current.fit();
         }
       } catch (e) {
-        console.warn('Xterm fit attempt skipped:', e);
+        // Detailed suppression to avoid crashing the UI
+        console.warn('Xterm fit deferred: rendering engine not yet ready');
       }
     };
-
-    // Sequenced delayed fits + delayed RO attach
-    addTimer(performFit, 100);
-    addTimer(performFit, 250);
+    addTimer(performFit, 50);
+    addTimer(performFit, 200);
     addTimer(() => {
       performFit();
-      // Attach RO with debounce
       const handleResize = () => {
         if (debounceTimeoutRef.current) {
           clearTimeout(debounceTimeoutRef.current as any);
@@ -109,15 +97,13 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
           if (!isDisposedRef.current) {
             requestAnimationFrame(performFit);
           }
-          debounceTimeoutRef.current = null;
-        }, 120) as unknown as NodeJS.Timeout;
+        }, 150) as unknown as NodeJS.Timeout;
       };
       roRef.current = new ResizeObserver(handleResize);
       if (containerRef.current) {
         roRef.current.observe(containerRef.current);
       }
-    }, 400);
-
+    }, 500);
     term.onData(onData);
     return () => {
       isDisposedRef.current = true;
@@ -125,14 +111,12 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
       timersRef.current = [];
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
-        debounceTimeoutRef.current = null;
       }
       roRef.current?.disconnect();
       roRef.current = null;
       try {
         if (fitAddonInstance.current) {
           fitAddonInstance.current.dispose();
-          fitAddonInstance.current = null;
         }
         term.dispose();
       } catch (e) {
