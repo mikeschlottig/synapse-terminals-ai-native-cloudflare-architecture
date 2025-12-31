@@ -1,50 +1,16 @@
 import { Hono } from "hono";
 import { Env } from './core-utils';
-import type { DemoItem, ApiResponse } from '@shared/types';
-
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
-    app.get('/api/test', (c) => c.json({ success: true, data: { name: 'CF Workers Demo' }}));
-
-    // Demo items endpoint using Durable Object storage
-    app.get('/api/demo', async (c) => {
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.getDemoItems();
-        return c.json({ success: true, data } satisfies ApiResponse<DemoItem[]>);
-    });
-
-    // Counter using Durable Object
-    app.get('/api/counter', async (c) => {
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.getCounterValue();
-        return c.json({ success: true, data } satisfies ApiResponse<number>);
-    });
-    
-    app.post('/api/counter/increment', async (c) => {
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.increment();
-        return c.json({ success: true, data } satisfies ApiResponse<number>);
-    });
-
-    // Demo item management endpoints
-    app.post('/api/demo', async (c) => {
-        const body = await c.req.json() as DemoItem;
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.addDemoItem(body);
-        return c.json({ success: true, data } satisfies ApiResponse<DemoItem[]>);
-    });
-
-    app.put('/api/demo/:id', async (c) => {
+    app.get('/api/test', (c) => c.json({ success: true, data: { name: 'Synapse API' }}));
+    // WebSocket Connection Route
+    // This route captures the ID and fetches the corresponding Durable Object
+    app.get('/api/terminal/:id/connect', async (c) => {
         const id = c.req.param('id');
-        const body = await c.req.json() as Partial<Omit<DemoItem, 'id'>>;
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.updateDemoItem(id, body);
-        return c.json({ success: true, data } satisfies ApiResponse<DemoItem[]>);
+        // We use the ID as the name to get a persistent DO instance for this terminal session
+        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName(id));
+        // Forward the WebSocket upgrade request to the DO instance
+        return durableObjectStub.fetch(c.req.raw);
     });
-
-    app.delete('/api/demo/:id', async (c) => {
-        const id = c.req.param('id');
-        const durableObjectStub = c.env.GlobalDurableObject.get(c.env.GlobalDurableObject.idFromName("global"));
-        const data = await durableObjectStub.deleteDemoItem(id);
-        return c.json({ success: true, data } satisfies ApiResponse<DemoItem[]>);
-    });
+    // Cleanup: Remove old demo routes or keep them for reference if needed
+    // But ensure the main /api/terminal route is priority
 }

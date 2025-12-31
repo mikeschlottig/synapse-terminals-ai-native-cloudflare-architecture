@@ -1,138 +1,109 @@
-// Home page of the app.
-// Currently a demo placeholder "please wait" screen.
-// Replace this file with your actual app UI. Do not delete it to use some other file as homepage. Simply replace the entire contents of this file.
-
-import { useEffect, useMemo, useState } from 'react'
-import { Sparkles } from 'lucide-react'
-
-import { ThemeToggle } from '@/components/ThemeToggle'
-import { HAS_TEMPLATE_DEMO, TemplateDemo } from '@/components/TemplateDemo'
-import { Button } from '@/components/ui/button'
-import { Toaster, toast } from '@/components/ui/sonner'
-
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+import React, { useState } from 'react';
+import { TerminalInterface } from '@/components/terminal/TerminalInterface';
+import { Button } from '@/components/ui/button';
+import { Plus, Terminal as TermIcon, Layers, Settings, LogOut, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Toaster, toast } from 'sonner';
+interface TerminalSession {
+  id: string;
+  name: string;
+  type: 'agent' | 'system';
 }
-
 export function HomePage() {
-  const [coins, setCoins] = useState(0)
-  const [isRunning, setIsRunning] = useState(false)
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [elapsedMs, setElapsedMs] = useState(0)
-
-  useEffect(() => {
-    if (!isRunning || startedAt === null) return
-
-    const t = setInterval(() => {
-      setElapsedMs(Date.now() - startedAt)
-    }, 250)
-
-    return () => clearInterval(t)
-  }, [isRunning, startedAt])
-
-  const formatted = useMemo(() => formatDuration(elapsedMs), [elapsedMs])
-
-  const onPleaseWait = () => {
-    setCoins((c) => c + 1)
-
-    if (!isRunning) {
-      // Resume from the current elapsed time
-      setStartedAt(Date.now() - elapsedMs)
-      setIsRunning(true)
-      toast.success('Building your app…', {
-        description: "Hang tight — we're setting everything up.",
-      })
-      return
-    }
-
-    setIsRunning(false)
-    toast.info('Still working…', {
-      description: 'You can come back in a moment.',
-    })
-  }
-
-  const onReset = () => {
-    setCoins(0)
-    setIsRunning(false)
-    setStartedAt(null)
-    setElapsedMs(0)
-    toast('Reset complete')
-  }
-
-  const onAddCoin = () => {
-    setCoins((c) => c + 1)
-    toast('Coin added')
-  }
-
+  const [terminals, setTerminals] = useState<TerminalSession[]>([
+    { id: 'default', name: 'Primary Terminal', type: 'system' }
+  ]);
+  const [activeId, setActiveId] = useState('default');
+  const addTerminal = () => {
+    const id = Math.random().toString(36).substring(7);
+    const names = ['Nexus Agent', 'Data Scraper', 'Kernel Watcher', 'Auth Guard'];
+    const name = names[Math.floor(Math.random() * names.length)] + `-${id.toUpperCase()}`;
+    setTerminals(prev => [...prev, { id, name, type: 'agent' }]);
+    setActiveId(id);
+    toast.success(`Session ${name} initialized`);
+  };
+  const activeTerminal = terminals.find(t => t.id === activeId);
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 overflow-hidden relative">
-      <ThemeToggle />
-      <div className="absolute inset-0 bg-gradient-rainbow opacity-10 dark:opacity-20 pointer-events-none" />
-
-      <div className="text-center space-y-8 relative z-10 animate-fade-in w-full">
-        <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-primary floating">
-            <Sparkles className="w-8 h-8 text-white rotating" />
+    <div className="flex h-screen w-full bg-[#09090b] text-foreground overflow-hidden font-sans">
+      {/* Sidebar */}
+      <aside className="w-64 border-r border-border bg-black/20 flex flex-col">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-8 h-8 rounded bg-primary flex items-center justify-center">
+              <Layers className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <h1 className="font-display font-bold text-xl tracking-tight">SYNAPSE</h1>
           </div>
-        </div>
-
-        <div className="space-y-3">
-          <h1 className="text-5xl md:text-7xl font-display font-bold text-balance leading-tight">
-            Creating your <span className="text-gradient">app</span>
-          </h1>
-          <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto text-pretty">
-            Your application would be ready soon.
-          </p>
-        </div>
-
-        {HAS_TEMPLATE_DEMO ? (
-          <div className="max-w-5xl mx-auto text-left">
-            <TemplateDemo />
-          </div>
-        ) : (
-          <>
-            <div className="flex justify-center gap-4">
-              <Button
-                size="lg"
-                onClick={onPleaseWait}
-                className="btn-gradient px-8 py-4 text-lg font-semibold hover:-translate-y-0.5 transition-all duration-200"
-                aria-live="polite"
+          <div className="space-y-1">
+            <div className="text-2xs font-bold text-muted-foreground uppercase tracking-wider px-2 mb-2">Sessions</div>
+            {terminals.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setActiveId(t.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all group",
+                  activeId === t.id 
+                    ? "bg-primary/10 text-primary border border-primary/20" 
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"
+                )}
               >
-                Please Wait
-              </Button>
+                <TermIcon className={cn("w-4 h-4", activeId === t.id ? "text-primary" : "text-muted-foreground")} />
+                <span className="text-sm font-medium truncate flex-1 text-left">{t.name}</span>
+                {activeId === t.id && <ChevronRight className="w-3 h-3" />}
+              </button>
+            ))}
+            <Button 
+              variant="ghost" 
+              className="w-full justify-start gap-3 mt-4 text-muted-foreground hover:text-primary"
+              onClick={addTerminal}
+            >
+              <Plus className="w-4 h-4" />
+              <span className="text-sm">New Session</span>
+            </Button>
+          </div>
+        </div>
+        <div className="mt-auto p-6 space-y-1 border-t border-border">
+          <Button variant="ghost" className="w-full justify-start gap-3 text-muted-foreground" size="sm">
+            <Settings className="w-4 h-4" /> <span>Settings</span>
+          </Button>
+          <Button variant="ghost" className="w-full justify-start gap-3 text-muted-foreground" size="sm">
+            <LogOut className="w-4 h-4" /> <span>Exit Node</span>
+          </Button>
+        </div>
+      </aside>
+      {/* Main Viewport */}
+      <main className="flex-1 flex flex-col min-w-0 bg-[#020617]">
+        <header className="h-14 border-b border-border flex items-center px-8 bg-black/10 backdrop-blur-sm">
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-muted-foreground">Location:</span>
+            <code className="text-primary bg-primary/5 px-2 py-0.5 rounded">/root/synapse/{activeTerminal?.name.toLowerCase().replace(/\s/g, '-')}</code>
+          </div>
+        </header>
+        <div className="flex-1 p-8 overflow-hidden">
+          {activeTerminal ? (
+            <TerminalInterface 
+              key={activeTerminal.id} 
+              terminalId={activeTerminal.id} 
+              name={activeTerminal.name} 
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground italic">
+              Select or create a session to begin.
             </div>
-
-            <div className="flex items-center justify-center gap-6 text-sm text-muted-foreground">
-              <div>
-                Time elapsed:{' '}
-                <span className="font-medium tabular-nums text-foreground">{formatted}</span>
-              </div>
-              <div>
-                Coins:{' '}
-                <span className="font-medium tabular-nums text-foreground">{coins}</span>
-              </div>
-            </div>
-
-            <div className="flex justify-center gap-2">
-              <Button variant="outline" size="sm" onClick={onReset}>
-                Reset
-              </Button>
-              <Button variant="outline" size="sm" onClick={onAddCoin}>
-                Add Coin
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <footer className="absolute bottom-8 text-center text-muted-foreground/80">
-        <p>Powered by Cloudflare</p>
-      </footer>
-
-      <Toaster richColors closeButton />
+          )}
+        </div>
+        <footer className="h-10 border-t border-border bg-black/20 flex items-center justify-between px-8 text-2xs text-muted-foreground font-mono">
+          <div className="flex gap-6">
+            <span>Uptime: 24:02:11</span>
+            <span>Latency: 14ms</span>
+          </div>
+          <div className="flex gap-6">
+            <span>Protocol: Syn-V3</span>
+            <span>Region: Earth-Primary</span>
+          </div>
+        </footer>
+      </main>
+      <Toaster position="bottom-right" theme="dark" richColors />
     </div>
-  )
+  );
 }
