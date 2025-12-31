@@ -1,5 +1,9 @@
 export type AgentType = 'coder' | 'reviewer' | 'security' | 'system';
-export type TerminalStatus = 'online' | 'offline' | 'connecting' | 'error' | 'syncing';
+export type TerminalStatus = 'online' | 'offline' | 'connecting' | 'error' | 'syncing' | 'processing';
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
 export interface FileSystemItem {
   name: string;
   type: 'file' | 'dir';
@@ -15,6 +19,7 @@ export interface TerminalConfig {
   cwd: string;
   isSystemNode?: boolean;
   lastActive?: string;
+  temperature?: number;
 }
 export interface MeshNode {
   id: string;
@@ -37,11 +42,6 @@ export interface MeshStats {
   avgLatency: number;
   systemHealth: number;
   messageCount?: number;
-}
-export interface ExecutionRequest {
-  prompt: string;
-  context?: Record<string, unknown>;
-  callerId: string;
 }
 export interface ApiResponse<T = unknown> {
   success: boolean;

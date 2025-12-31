@@ -1,9 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
-import type { TerminalConfig, AgentType, ApiResponse, FileSystemItem, InterNodeMessage, MeshNode } from '@shared/types';
+import type { TerminalConfig, AgentType, FileSystemItem, InterNodeMessage, MeshNode, ChatMessage } from '@shared/types';
 import { Env } from "./core-utils";
+interface AIEnv {
+  run(model: string, options: { messages: ChatMessage[] }): Promise<{ response: string }>;
+}
 export class GlobalDurableObject extends DurableObject<Env> {
     private sessions: Set<WebSocket> = new Set();
     private config: TerminalConfig | null = null;
+    private history: ChatMessage[] = [];
     constructor(ctx: DurableObjectState, env: Env) {
         super(ctx, env);
     }
@@ -18,7 +22,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
             id: this.ctx.id.toString(),
             name: "Agent-" + this.ctx.id.toString().slice(0, 4),
             agentType: 'system',
-            systemPrompt: "You are a helpful Synapse system agent.",
+            systemPrompt: "You are a specialized Synapse terminal node. Use only terminal commands like ls, touch, echo. If asked questions, answer like a hacker/sysadmin.",
             status: 'online',
             cwd: '/',
             isSystemNode: false,
@@ -69,14 +73,9 @@ export class GlobalDurableObject extends DurableObject<Env> {
                 const updated = { ...current, ...updates, lastActive: new Date().toISOString() };
                 await this.ctx.storage.put("config", updated);
                 this.config = updated;
-                this.broadcast(`\r\n\x1b[35m[SYSTEM] Config Sync: ${updated.agentType.toUpperCase()} profile active.\x1b[0m\r\n\x1b[32muser@synapse:${updated.cwd}$ \x1b[0m`);
+                this.broadcast(`\r\n\x1b[35m[SYSTEM] Neural Re-Sync: ${updated.agentType.toUpperCase()} persona engaged.\x1b[0m\r\n\x1b[32muser@synapse:${updated.cwd}$ \x1b[0m`);
                 return Response.json({ success: true, data: updated });
             }
-        }
-        if (url.pathname.includes('/execute') && request.method === 'POST') {
-            const msg = await request.json() as InterNodeMessage;
-            const config = await this.ensureConfig();
-            return Response.json({ success: true, data: `[${config.name}] Remote CMD: "${msg.payload.command}" processed.` });
         }
         return new Response('Not Found', { status: 404 });
     }
@@ -89,141 +88,146 @@ export class GlobalDurableObject extends DurableObject<Env> {
         ws.accept();
         this.sessions.add(ws);
         const config = await this.ensureConfig();
-        // Immersive Boot Sequence
-        const bootLines = [
+        const bootSequence = [
             `\x1b[1;36m>> INITIATING NEURAL UPLINK...\x1b[0m`,
-            `\x1b[90m[OK] Kernel 1.4.2-SYNAPSE-DO detected\x1b[0m`,
-            `\x1b[90m[OK] Synchronizing mesh registry...\x1b[0m`,
-            `\x1b[90m[OK] Mounting persistent DO storage at /ctx\x1b[0m`,
-            `\x1b[90m[OK] Loading persona: ${config.agentType.toUpperCase()}\x1b[0m`,
-            `\r\n\x1b[33m[SYNAPSE]\x1b[0m Node: ${config.name} online.\r\n`
+            `\x1b[90m[OK] Neural Engine: @cf/meta/llama-3-8b-instruct engaged\x1b[0m`,
+            `\x1b[90m[OK] CWD: ${config.cwd} mounted\x1b[0m`,
+            `\r\n\x1b[33m[SYNAPSE]\x1b[0m Node: ${config.name} (${config.agentType}) online.\r\n`
         ];
-        for (const line of bootLines) {
+        for (const line of bootSequence) {
             ws.send(line + '\r\n');
-            await new Promise(r => setTimeout(r, 80 + Math.random() * 150));
+            await new Promise(r => setTimeout(r, 100));
         }
         ws.send(`\x1b[32muser@synapse:${config.cwd}$ \x1b[0m`);
-        let inputBuffer = '';
+        let buffer = '';
         ws.addEventListener('message', async (event) => {
             const data = event.data as string;
             if (data === '\r') {
-                const command = inputBuffer.trim();
+                const command = buffer.trim();
                 ws.send('\r\n');
-                await this.processCommand(ws, command);
-                const currentConfig = await this.ensureConfig();
-                inputBuffer = '';
-                ws.send(`\r\n\x1b[32muser@synapse:${currentConfig.cwd}$ \x1b[0m`);
-            } else if (data === '\u007f') { // Backspace
-                if (inputBuffer.length > 0) {
-                    inputBuffer = inputBuffer.slice(0, -1);
+                if (command) {
+                    await this.processCommand(ws, command);
+                }
+                const updated = await this.ensureConfig();
+                ws.send(`\r\n\x1b[32muser@synapse:${updated.cwd}$ \x1b[0m`);
+                buffer = '';
+            } else if (data === '\u007f') {
+                if (buffer.length > 0) {
+                    buffer = buffer.slice(0, -1);
                     ws.send('\b \b');
                 }
             } else {
-                inputBuffer += data;
+                buffer += data;
                 ws.send(data);
             }
         });
         ws.addEventListener('close', () => this.sessions.delete(ws));
     }
-    private async processCommand(ws: WebSocket, commandString: string) {
-        if (!commandString) return;
+    private async processCommand(ws: WebSocket, command: string) {
+        const builtins = ['ls', 'cd', 'mkdir', 'touch', 'rm', 'cat', 'whoami', 'help', 'clear'];
+        const cmd = command.split(' ')[0];
+        if (builtins.includes(cmd)) {
+            await this.handleBuiltin(ws, command);
+            return;
+        }
+        // Fallback to Workers AI for non-builtin or natural language
+        await this.handleAICommand(ws, command);
+    }
+    private async handleAICommand(ws: WebSocket, command: string) {
         const config = await this.ensureConfig();
         const root = await this.ctx.storage.get<FileSystemItem>("fs_root") || { name: '/', type: 'dir', children: [] };
-        // Handle redirection: echo "data" > file
-        if (commandString.includes('>')) {
-            const [cmdPart, filePart] = commandString.split('>').map(s => s.trim());
-            if (cmdPart.startsWith('echo ')) {
-                const content = cmdPart.slice(5).replace(/^"|"$/g, '');
-                const fileName = filePart;
-                const existing = root.children?.find(f => f.name === fileName);
-                if (existing) {
-                    existing.content = content;
-                    existing.type = 'file';
-                } else {
-                    root.children?.push({ name: fileName, type: 'file', content });
-                }
-                await this.ctx.storage.put("fs_root", root);
-                ws.send(`[OK] Wrote to ${fileName}\r\n`);
+        ws.send(`\x1b[90m>> RELAYING TO NEURAL CORE...\x1b[0m\r\n`);
+        const fsSummary = root.children?.map(c => `${c.name} (${c.type})`).join(', ') || 'empty';
+        const aiMessages: ChatMessage[] = [
+            { 
+                role: 'system', 
+                content: `${config.systemPrompt}\n\nEnvironment context:\n- CWD: ${config.cwd}\n- FS: [${fsSummary}]\n- Role: ${config.agentType}\n\nRules: If you want to modify files, use tags like [[touch filename]] or [[echo "text" > file]]. Keep responses concise.` 
+            },
+            ...this.history.slice(-4),
+            { role: 'user', content: command }
+        ];
+        try {
+            // Check if AI binding exists on env
+            const ai = (this.env as any).AI as AIEnv;
+            if (!ai) {
+                ws.send(`\x1b[31m[ERROR] AI Core unavailable. Use 'help' for builtins.\x1b[0m\r\n`);
                 return;
             }
+            const result = await ai.run('@cf/meta/llama-3-8b-instruct', { messages: aiMessages });
+            const response = result.response;
+            // Update history
+            this.history.push({ role: 'user', content: command });
+            this.history.push({ role: 'assistant', content: response });
+            if (this.history.length > 10) this.history = this.history.slice(-10);
+            // Handle AI Tool Calls (Syntactic Sugar)
+            const toolRegex = /\[\[(.*?)\]\]/g;
+            let match;
+            let finalOutput = response;
+            while ((match = toolRegex.exec(response)) !== null) {
+                const toolCmd = match[1].trim();
+                ws.send(`\x1b[35m[AI_EXEC]\x1b[0m ${toolCmd}\r\n`);
+                await this.handleBuiltin(ws, toolCmd, true);
+                finalOutput = finalOutput.replace(match[0], '');
+            }
+            ws.send(`\x1b[36m[NODE_RESPONSE]\x1b[0m ${finalOutput.trim()}\r\n`);
+        } catch (e) {
+            console.error('AI Processing Error:', e);
+            ws.send(`\x1b[31m[ERROR] Neural saturation detected. Response failed.\x1b[0m\r\n`);
         }
-        const parts = commandString.split(' ');
+    }
+    private async handleBuiltin(ws: WebSocket, command: string, silent = false) {
+        const parts = command.split(' ');
         const cmd = parts[0];
         const args = parts.slice(1);
+        const root = await this.ctx.storage.get<FileSystemItem>("fs_root") || { name: '/', type: 'dir', children: [] };
+        const config = await this.ensureConfig();
         switch (cmd) {
-            case 'ls': {
-                const output = root.children?.map(item =>
-                    item.type === 'dir' ? `\x1b[1;34m${item.name}/\x1b[0m` : item.name
-                ).join('  ');
-                ws.send(`${output || 'empty'}\r\n`);
+            case 'ls':
+                const out = root.children?.map(i => i.type === 'dir' ? `\x1b[1;34m${i.name}/\x1b[0m` : i.name).join('  ');
+                ws.send(`${out || 'empty'}\r\n`);
                 break;
-            }
-            case 'mkdir': {
-                const dirName = args[0];
-                if (!dirName) { ws.send(`mkdir: missing operand\r\n`); break; }
-                root.children?.push({ name: dirName, type: 'dir', children: [] });
-                await this.ctx.storage.put("fs_root", root);
-                ws.send(`[OK] Directory created: ${dirName}\r\n`);
-                break;
-            }
-            case 'touch': {
-                const fileName = args[0];
-                if (!fileName) { ws.send(`touch: missing file operand\r\n`); break; }
-                root.children?.push({ name: fileName, type: 'file', content: '' });
-                await this.ctx.storage.put("fs_root", root);
-                break;
-            }
-            case 'rm': {
-                const target = args[0];
-                const index = root.children?.findIndex(f => f.name === target) ?? -1;
-                if (index > -1) {
-                    root.children?.splice(index, 1);
+            case 'mkdir':
+                if (args[0]) {
+                    root.children?.push({ name: args[0], type: 'dir', children: [] });
                     await this.ctx.storage.put("fs_root", root);
-                    ws.send(`[OK] Removed ${target}\r\n`);
-                } else {
-                    ws.send(`rm: cannot remove '${target}': No such file or directory\r\n`);
+                    if (!silent) ws.send(`Created directory: ${args[0]}\r\n`);
                 }
                 break;
-            }
-            case 'cd': {
-                const path = args[0] || '/';
-                // Simple simulated CD
-                const newCwd = path.startsWith('/') ? path : (config.cwd === '/' ? `/${path}` : `${config.cwd}/${path}`);
-                const updated = { ...config, cwd: newCwd };
-                await this.ctx.storage.put("config", updated);
-                this.config = updated;
+            case 'touch':
+                if (args[0]) {
+                    root.children?.push({ name: args[0], type: 'file', content: '' });
+                    await this.ctx.storage.put("fs_root", root);
+                    if (!silent) ws.send(`Created file: ${args[0]}\r\n`);
+                }
                 break;
-            }
-            case 'cat': {
-                const name = args[0];
-                const file = root.children?.find(f => f.name === name);
-                if (!file) ws.send(`cat: ${name}: No such file\r\n`);
-                else if (file.type === 'dir') ws.send(`cat: ${name}: Is a directory\r\n`);
-                else ws.send(`${file.content || ''}\r\n`);
+            case 'rm':
+                const idx = root.children?.findIndex(f => f.name === args[0]) ?? -1;
+                if (idx > -1) {
+                    root.children?.splice(idx, 1);
+                    await this.ctx.storage.put("fs_root", root);
+                    if (!silent) ws.send(`Removed ${args[0]}\r\n`);
+                }
                 break;
-            }
+            case 'cat':
+                const file = root.children?.find(f => f.name === args[0]);
+                if (file) ws.send(`${file.content || '(empty)'}\r\n`);
+                else ws.send(`cat: ${args[0]}: No such file\r\n`);
+                break;
             case 'whoami':
-                ws.send(`\x1b[36mNODE IDENTITY\x1b[0m\r\nID: ${this.ctx.id.toString()}\r\nPersona: ${config.agentType.toUpperCase()}\r\nUptime: ${Math.floor(Date.now() / 1000000)}ns\r\n`);
+                ws.send(`NODE: ${config.name}\r\nPERSONA: ${config.agentType}\r\n`);
                 break;
             case 'help':
-                ws.send('\x1b[36mCommands:\x1b[0m ls, mkdir, touch, rm, cd, cat, echo, whoami, clear, help\r\n');
+                ws.send(`Builtins: ls, cd, mkdir, touch, rm, cat, whoami, help, clear\r\nUse natural language for AI assistance.\r\n`);
                 break;
             case 'clear':
                 ws.send('\x1b[2J\x1b[H');
                 break;
-            default: {
-                const prefixes: Record<AgentType, string[]> = {
-                    coder: ['Scanning code architecture...', 'Compiling neural heuristics...', 'Resolving dependencies...'],
-                    security: ['Auditing firewall logs...', 'Checking for intrusion vectors...', 'Hardening system memory...'],
-                    reviewer: ['Analyzing peer request...', 'Validating mesh standards...', 'Flagging logic inconsistencies...'],
-                    system: ['Scheduling DO task...', 'Relaying packet through mesh...', 'Optimizing resource allocation...']
-                };
-                const choices = prefixes[config.agentType] || prefixes.system;
-                const prefix = choices[Math.floor(Math.random() * choices.length)];
-                ws.send(`\x1b[35m[${config.agentType.toUpperCase()}]\x1b[0m ${prefix}\r\n`);
-                await new Promise(r => setTimeout(r, 500));
-                ws.send(`\x1b[1;32mExecution verified.\x1b[0m SIG: ${Math.random().toString(36).slice(2, 10).toUpperCase()}\r\n`);
-            }
+            case 'cd':
+                const path = args[0] || '/';
+                const updated = { ...config, cwd: path };
+                await this.ctx.storage.put("config", updated);
+                this.config = updated;
+                break;
         }
     }
 }

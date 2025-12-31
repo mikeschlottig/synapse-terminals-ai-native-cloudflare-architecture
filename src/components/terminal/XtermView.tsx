@@ -18,16 +18,24 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstance = useRef<Terminal | null>(null);
   const fitAddonInstance = useRef<FitAddon | null>(null);
+  const isDisposedRef = useRef(false);
   useImperativeHandle(ref, () => ({
-    write: (data: string) => terminalInstance.current?.write(data),
-    clear: () => {
-      terminalInstance.current?.clear();
-      terminalInstance.current?.write('\x1b[2J\x1b[H');
+    write: (data: string) => {
+      if (!isDisposedRef.current) terminalInstance.current?.write(data);
     },
-    focus: () => terminalInstance.current?.focus(),
+    clear: () => {
+      if (!isDisposedRef.current) {
+        terminalInstance.current?.clear();
+        terminalInstance.current?.write('\x1b[2J\x1b[H');
+      }
+    },
+    focus: () => {
+      if (!isDisposedRef.current) terminalInstance.current?.focus();
+    },
   }));
   useEffect(() => {
     if (!containerRef.current) return;
+    isDisposedRef.current = false;
     const term = new Terminal({
       theme: TERMINAL_THEME,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
@@ -45,27 +53,41 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
     terminalInstance.current = term;
     fitAddonInstance.current = fit;
     const performFit = () => {
-      if (containerRef.current && fitAddonInstance.current) {
-        try {
-          // Check if terminal is actually open and container has dimensions
-          if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
-            fitAddonInstance.current.fit();
-          }
-        } catch (e) {
-          console.warn('Xterm fit failed', e);
+      if (isDisposedRef.current || !containerRef.current || !fitAddonInstance.current || !terminalInstance.current) return;
+      try {
+        // Fix for "Cannot read properties of undefined (reading 'dimensions')"
+        // Ensure terminal is opened, has an element, and container is in DOM with size
+        const termElement = (terminalInstance.current as any).element;
+        if (
+          termElement && 
+          document.contains(containerRef.current) &&
+          containerRef.current.clientWidth > 0 && 
+          containerRef.current.clientHeight > 0
+        ) {
+          fitAddonInstance.current.fit();
         }
+      } catch (e) {
+        // Silently catch fit errors to prevent app crash
+        console.warn('Xterm fit attempt skipped:', e);
       }
     };
-    const timer = setTimeout(performFit, 100);
+    const timer = setTimeout(performFit, 150);
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(performFit);
+      if (!isDisposedRef.current) {
+        requestAnimationFrame(performFit);
+      }
     });
     resizeObserver.observe(containerRef.current);
     term.onData(onData);
     return () => {
+      isDisposedRef.current = true;
       clearTimeout(timer);
       resizeObserver.disconnect();
-      term.dispose();
+      try {
+        term.dispose();
+      } catch (e) {
+        console.error('Error disposing terminal:', e);
+      }
       terminalInstance.current = null;
       fitAddonInstance.current = null;
     };
