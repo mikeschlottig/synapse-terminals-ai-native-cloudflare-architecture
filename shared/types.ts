@@ -1,4 +1,5 @@
 export type AgentType = 'coder' | 'reviewer' | 'security' | 'system';
+export type TerminalStatus = 'online' | 'offline' | 'connecting' | 'error' | 'syncing';
 export interface FileSystemItem {
   name: string;
   type: 'file' | 'dir';
@@ -10,7 +11,7 @@ export interface TerminalConfig {
   name: string;
   agentType: AgentType;
   systemPrompt: string;
-  status: 'online' | 'offline';
+  status: TerminalStatus;
   cwd: string;
   isSystemNode?: boolean;
   lastActive?: string;

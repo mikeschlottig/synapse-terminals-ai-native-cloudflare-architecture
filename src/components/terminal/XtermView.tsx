@@ -4,6 +4,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import 'xterm/css/xterm.css';
 import { TERMINAL_THEME } from '@/lib/terminal-theme';
+import { cn } from '@/lib/utils';
 interface XtermViewProps {
   onData: (data: string) => void;
   className?: string;
@@ -46,14 +47,16 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
     const performFit = () => {
       if (containerRef.current && fitAddonInstance.current) {
         try {
-          fitAddonInstance.current.fit();
+          // Check if terminal is actually open and container has dimensions
+          if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+            fitAddonInstance.current.fit();
+          }
         } catch (e) {
           console.warn('Xterm fit failed', e);
         }
       }
     };
-    // Delay initial fit to ensure container sizing is stable
-    const timer = setTimeout(performFit, 50);
+    const timer = setTimeout(performFit, 100);
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(performFit);
     });
@@ -63,9 +66,10 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
       clearTimeout(timer);
       resizeObserver.disconnect();
       term.dispose();
+      terminalInstance.current = null;
+      fitAddonInstance.current = null;
     };
   }, [onData]);
-  return <div ref={containerRef} className={cn("w-full h-full min-h-[100px]", className)} />;
+  return <div ref={containerRef} className={cn("w-full h-full min-h-[100px] bg-[#09090b]", className)} />;
 });
-import { cn } from '@/lib/utils';
 XtermView.displayName = 'XtermView';
