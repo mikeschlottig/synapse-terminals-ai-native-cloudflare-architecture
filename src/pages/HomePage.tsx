@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { TerminalInterface } from '@/components/terminal/TerminalInterface';
 import { CommandPalette } from '@/components/terminal/CommandPalette';
 import { Button } from '@/components/ui/button';
-import { Plus, Terminal as TermIcon, Layers, Settings, LogOut, ChevronRight, Code, Shield, UserCheck, Cpu, LayoutGrid, Square } from 'lucide-react';
+import { Plus, Layers, Settings, ChevronRight, Code, Shield, UserCheck, Cpu, LayoutGrid, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Toaster, toast } from 'sonner';
 import { AgentType } from '@shared/types';
@@ -32,7 +32,7 @@ export function HomePage() {
     const name = `${prefixes[type]}-${id.toUpperCase()}`;
     setTerminals(prev => [...prev, { id, name, type }]);
     setActiveId(id);
-    toast.success(`${type.toUpperCase()} Agent session initialized`, { description: `Node: ${name}` });
+    toast.success(`Agent initialized`, { description: `Node: ${name}` });
   }, []);
   const activeTerminal = terminals.find(t => t.id === activeId);
   return (
@@ -45,14 +45,24 @@ export function HomePage() {
             </div>
             <h1 className="font-display font-bold text-xl tracking-tight">SYNAPSE</h1>
           </div>
-          <div className="space-y-1">
-            <div className="text-2xs font-bold text-muted-foreground uppercase tracking-wider px-2 mb-2">Active Mesh</div>
+          <div className="flex items-center justify-between px-2 mb-2">
+            <div className="text-2xs font-bold text-muted-foreground uppercase tracking-wider">Active Mesh</div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-5 w-5 hover:text-primary" 
+              onClick={() => addTerminal('system')}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="space-y-1 overflow-y-auto max-h-[calc(100vh-300px)] pr-2">
             {terminals.map(t => (
               <button
                 key={t.id}
                 onClick={() => { setActiveId(t.id); setViewMode('focus'); }}
                 className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all group border",
+                  "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all border",
                   activeId === t.id && viewMode === 'focus'
                     ? "bg-primary/10 text-primary border-primary/20"
                     : "text-muted-foreground hover:bg-muted/30 border-transparent"
@@ -82,9 +92,9 @@ export function HomePage() {
             </code>
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               className={cn("h-8 gap-2", viewMode === 'mesh' && "bg-primary/10 border-primary/40 text-primary")}
               onClick={() => setViewMode(v => v === 'focus' ? 'mesh' : 'focus')}
             >
@@ -97,11 +107,11 @@ export function HomePage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full py-6 md:py-8">
             <AnimatePresence mode="wait">
               {viewMode === 'focus' ? (
-                <motion.div 
-                  key="focus"
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 1.02 }}
+                <motion.div
+                  key="focus-view"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
                   className="h-full"
                 >
                   {activeTerminal ? (
@@ -111,17 +121,17 @@ export function HomePage() {
                       name={activeTerminal.name}
                     />
                   ) : (
-                    <div className="h-full flex items-center justify-center text-muted-foreground italic border border-dashed border-border rounded-lg">
+                    <div className="h-full flex items-center justify-center text-muted-foreground border border-dashed border-border rounded-lg">
                       Select a node from the mesh.
                     </div>
                   )}
                 </motion.div>
               ) : (
-                <motion.div 
-                  key="mesh"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
+                <motion.div
+                  key="mesh-grid"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full overflow-y-auto pr-2 pb-4"
                 >
                   {terminals.map(t => (
@@ -149,7 +159,7 @@ export function HomePage() {
           </div>
         </footer>
       </main>
-      <CommandPalette 
+      <CommandPalette
         onAddTerminal={addTerminal}
         onSwitchTerminal={(id) => { setActiveId(id); setViewMode('focus'); }}
         onToggleView={setViewMode}

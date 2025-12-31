@@ -14,16 +14,19 @@ export interface XtermRef {
   focus: () => void;
 }
 export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, className }, ref) => {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermInstance = useRef<Terminal | null>(null);
-  const fitAddon = useRef<FitAddon | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalInstance = useRef<Terminal | null>(null);
+  const fitAddonInstance = useRef<FitAddon | null>(null);
   useImperativeHandle(ref, () => ({
-    write: (data: string) => xtermInstance.current?.write(data),
-    clear: () => xtermInstance.current?.clear(),
-    focus: () => xtermInstance.current?.focus(),
+    write: (data: string) => terminalInstance.current?.write(data),
+    clear: () => {
+      terminalInstance.current?.clear();
+      terminalInstance.current?.write('\x1b[2J\x1b[H');
+    },
+    focus: () => terminalInstance.current?.focus(),
   }));
   useEffect(() => {
-    if (!terminalRef.current) return;
+    if (!containerRef.current) return;
     const term = new Terminal({
       theme: TERMINAL_THEME,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
@@ -31,26 +34,38 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
       cursorBlink: true,
       cursorStyle: 'block',
       allowProposedApi: true,
+      rows: 24,
+      cols: 80
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
-    term.open(terminalRef.current);
-    requestAnimationFrame(() => fit.fit());
-    term.onData(onData);
-    xtermInstance.current = term;
-    fitAddon.current = fit;
-    
+    term.open(containerRef.current);
+    terminalInstance.current = term;
+    fitAddonInstance.current = fit;
+    const performFit = () => {
+      if (containerRef.current && fitAddonInstance.current) {
+        try {
+          fitAddonInstance.current.fit();
+        } catch (e) {
+          console.warn('Xterm fit failed', e);
+        }
+      }
+    };
+    // Delay initial fit to ensure container sizing is stable
+    const timer = setTimeout(performFit, 50);
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
+      requestAnimationFrame(performFit);
     });
-    resizeObserver.observe(terminalRef.current!);
-    
+    resizeObserver.observe(containerRef.current);
+    term.onData(onData);
     return () => {
+      clearTimeout(timer);
       resizeObserver.disconnect();
       term.dispose();
     };
-    }, [onData]);
-  return <div ref={terminalRef} className={className} />;
+  }, [onData]);
+  return <div ref={containerRef} className={cn("w-full h-full min-h-[100px]", className)} />;
 });
+import { cn } from '@/lib/utils';
 XtermView.displayName = 'XtermView';
