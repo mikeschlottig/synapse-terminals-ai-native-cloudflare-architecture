@@ -41,16 +41,6 @@ export interface ExecuteResponse {
   text: string;
   logs?: string[];
 }
-export interface InterNodeMessage {
-  from: string;
-  to: string;
-  type: 'command' | 'status' | 'data' | 'relay_start' | 'relay_end';
-  payload: {
-    command?: string;
-    data?: any;
-    result?: string;
-  };
-}
 export interface MeshStats {
   totalNodes: number;
   activeConnections: number;

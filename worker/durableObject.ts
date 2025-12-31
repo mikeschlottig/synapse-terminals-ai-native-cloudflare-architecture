@@ -1,5 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
-import type { TerminalConfig, AgentType, FileSystemItem, ExecuteRequest, ExecuteResponse, MeshNode, ChatMessage } from '@shared/types';
+import type { 
+  TerminalConfig, 
+  AgentType, 
+  FileSystemItem, 
+  ExecuteRequest, 
+  ExecuteResponse, 
+  MeshNode, 
+  ChatMessage,
+  ApiResponse 
+} from '@shared/types';
 import { Env } from "./core-utils";
 interface AIEnv {
   run(model: string, options: { messages: ChatMessage[] }): Promise<{ response: string }>;
@@ -45,16 +54,16 @@ export class GlobalDurableObject extends DurableObject<Env> {
         const url = new URL(request.url);
         if (url.pathname === '/api/mesh/nodes') {
             const nodes = await this.ctx.storage.get<MeshNode[]>("mesh_nodes") || [];
-            return Response.json({ success: true, data: nodes });
+            return Response.json({ success: true, data: nodes } satisfies ApiResponse<MeshNode[]>);
         }
         if (url.pathname === '/api/mesh/register' && request.method === 'POST') {
             const newNode = await request.json() as MeshNode;
             const nodes = await this.ctx.storage.get<MeshNode[]>("mesh_nodes") || [];
-            if (!nodes.find(n => n.id === newNode.id)) {
+            if (!nodes.find((n: MeshNode) => n.id === newNode.id)) {
                 nodes.push({ ...newNode, createdAt: new Date().toISOString() });
                 await this.ctx.storage.put("mesh_nodes", nodes);
             }
-            return Response.json({ success: true, data: nodes });
+            return Response.json({ success: true, data: nodes } satisfies ApiResponse<MeshNode[]>);
         }
         if (url.pathname.endsWith('/execute') && request.method === 'POST') {
           const req = await request.json() as ExecuteRequest;
@@ -72,7 +81,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
         if (url.pathname.includes('/config')) {
             if (request.method === 'GET') {
                 const config = await this.ensureConfig();
-                return Response.json({ success: true, data: config });
+                return Response.json({ success: true, data: config } satisfies ApiResponse<TerminalConfig>);
             }
             if (request.method === 'PUT') {
                 const updates = await request.json() as Partial<TerminalConfig>;
@@ -81,7 +90,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
                 await this.ctx.storage.put("config", updated);
                 this.config = updated;
                 this.broadcast(`\r\n\x1b[35m[SYSTEM] Neural Re-Sync: ${updated.agentType.toUpperCase()} persona engaged.\x1b[0m\r\n\x1b[32muser@synapse:${updated.cwd}$ \x1b[0m`);
-                return Response.json({ success: true, data: updated });
+                return Response.json({ success: true, data: updated } satisfies ApiResponse<TerminalConfig>);
             }
         }
         return new Response('Not Found', { status: 404 });
@@ -127,7 +136,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
           await this.handleInterNodeCall(ws, command);
           return;
         }
-        const builtins = ['ls', 'cd', 'mkdir', 'touch', 'rm', 'cat', 'whoami', 'help', 'clear'];
+        const builtins = ['ls', 'cd', 'mkdir', 'touch', 'rm', 'cat', 'whoami', 'help', 'clear', 'pwd'];
         const cmd = command.split(' ')[0];
         if (builtins.includes(cmd)) {
             await this.handleBuiltin(ws, command);
@@ -212,12 +221,56 @@ export class GlobalDurableObject extends DurableObject<Env> {
         const parts = command.split(' ');
         const cmd = parts[0];
         const args = parts.slice(1);
-        const root = await this.ctx.storage.get<FileSystemItem>("fs_root") || { name: '/', type: 'dir', children: [] };
+        let root = await this.ctx.storage.get<FileSystemItem>("fs_root") || { name: '/', type: 'dir', children: [] };
         const config = await this.ensureConfig();
         switch (cmd) {
             case 'ls': {
                 const out = root.children?.map(i => i.type === 'dir' ? `\x1b[1;34m${i.name}/\x1b[0m` : i.name).join('  ');
                 ws.send(`${out || 'empty'}\r\n`);
+                break;
+            }
+            case 'pwd':
+                ws.send(`${config.cwd}\r\n`);
+                break;
+            case 'mkdir': {
+                const name = args[0];
+                if (!name) ws.send("Usage: mkdir <dirname>\r\n");
+                else {
+                    root.children = root.children || [];
+                    if (root.children.find(i => i.name === name)) ws.send("Error: Already exists\r\n");
+                    else {
+                        root.children.push({ name, type: 'dir', children: [] });
+                        await this.ctx.storage.put("fs_root", root);
+                    }
+                }
+                break;
+            }
+            case 'touch': {
+                const name = args[0];
+                if (!name) ws.send("Usage: touch <filename>\r\n");
+                else {
+                    root.children = root.children || [];
+                    if (!root.children.find(i => i.name === name)) {
+                        root.children.push({ name, type: 'file', content: "" });
+                        await this.ctx.storage.put("fs_root", root);
+                    }
+                }
+                break;
+            }
+            case 'rm': {
+                const name = args[0];
+                if (!name) ws.send("Usage: rm <name>\r\n");
+                else {
+                    root.children = root.children?.filter(i => i.name !== name) || [];
+                    await this.ctx.storage.put("fs_root", root);
+                }
+                break;
+            }
+            case 'cat': {
+                const name = args[0];
+                const file = root.children?.find(i => i.name === name && i.type === 'file');
+                if (file) ws.send(`${file.content || ''}\r\n`);
+                else ws.send(`cat: ${name}: No such file\r\n`);
                 break;
             }
             case 'whoami':
@@ -227,7 +280,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
                 ws.send('\x1b[2J\x1b[H');
                 break;
             case 'help':
-                ws.send(`Commands: ls, whoami, clear, help, @[agent] [msg]\r\n`);
+                ws.send(`Synapse OS v1.4.2 Commands:\r\nls, pwd, mkdir, touch, rm, cat, whoami, clear, help, @[agent] [msg]\r\n`);
                 break;
             default:
                 ws.send(`Unknown builtin: ${cmd}\r\n`);
