@@ -83,7 +83,8 @@ function runSetupCommands() {
     "bun add xterm-addon-fit@^0.8.0",
     "bun install xterm xterm-addon-fit xterm-addon-web-links",
     "bun install framer-motion@11.11.1",
-    "bun install lucide-react clsx tailwind-merge framer-motion"
+    "bun install lucide-react clsx tailwind-merge framer-motion",
+    "bun install xterm@^5.3.0 xterm-addon-fit@^0.8.0"
 ];
     
     if (commands.length === 0) {
