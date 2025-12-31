@@ -36,17 +36,21 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.open(terminalRef.current);
-    fit.fit();
+    requestAnimationFrame(() => fit.fit());
     term.onData(onData);
     xtermInstance.current = term;
     fitAddon.current = fit;
-    const handleResize = () => fit.fit();
-    window.addEventListener('resize', handleResize);
+    
+    const resizeObserver = new ResizeObserver(() => {
+      fit.fit();
+    });
+    resizeObserver.observe(terminalRef.current!);
+    
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       term.dispose();
     };
-  }, []);
+    }, [onData]);
   return <div ref={terminalRef} className={className} />;
 });
 XtermView.displayName = 'XtermView';
