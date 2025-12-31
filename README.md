@@ -1,6 +1,6 @@
 # Synapse Terminals
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/synapse-terminals-ai-native-cloudflare-architecture)
 
 A modern full-stack application template powered by Cloudflare Workers and Pages. This project combines a high-performance React frontend with a serverless Hono backend, featuring Durable Objects for persistent state management. Built with TypeScript, Tailwind CSS, and shadcn/ui for a production-ready developer experience.
 
@@ -109,7 +109,7 @@ This builds the frontend and deploys via Wrangler.
 3. **Custom Domain** (optional):
    Edit `wrangler.jsonc` and run `wrangler deploy`.
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/synapse-terminals-ai-native-cloudflare-architecture)
 
 ### Pages Integration
 - Frontend assets served as SPA.
