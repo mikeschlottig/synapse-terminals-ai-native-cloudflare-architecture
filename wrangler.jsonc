@@ -4,7 +4,7 @@
  */
  {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "vite-cf-do-runner",
+	"name": "synapse-terminals--v7s1dgqkjbc1g1fupsap",
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-04-24",
 	"assets": {
