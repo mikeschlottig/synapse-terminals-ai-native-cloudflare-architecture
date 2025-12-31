@@ -63,7 +63,6 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
       ws.onmessage = (event) => {
         if (!isMountedRef.current) return;
         const data = event.data;
-        // Detection of AI processing markers
         if (data.includes('>> INITIATING NEURAL')) setIsProcessing(true);
         if (data.includes('user@synapse')) setIsProcessing(false);
         xtermRef.current?.write(data);
@@ -108,10 +107,10 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
       <div className="flex items-center justify-between bg-muted/20 border-b border-border px-4 py-2">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <AgentIcon 
-              type={config?.agentType || 'system'} 
+            <AgentIcon
+              type={config?.agentType || 'system'}
               isProcessing={isProcessing}
-              className={cn("text-primary", compact ? "w-3.5 h-3.5" : "w-4 h-4")} 
+              className={cn("text-primary", compact ? "w-3.5 h-3.5" : "w-4 h-4")}
             />
             {isConnected && (
               <span className={cn(
@@ -156,7 +155,7 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
       </div>
       <div className="flex-1 min-h-0 bg-black/20 relative group">
         <XtermView ref={xtermRef} onData={handleData} className="h-full" />
-        {(!isConnected || status === 'connecting') && (
+        {status !== 'online' && (
           <div className="absolute inset-0 z-10 bg-black/60 flex items-center justify-center backdrop-blur-[2px]">
              <div className="flex flex-col items-center gap-3">
                 <Loader2 className="w-5 h-5 text-primary animate-spin" />

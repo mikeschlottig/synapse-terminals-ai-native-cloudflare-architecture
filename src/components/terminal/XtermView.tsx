@@ -21,16 +21,20 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
   const isDisposedRef = useRef(false);
   useImperativeHandle(ref, () => ({
     write: (data: string) => {
-      if (!isDisposedRef.current) terminalInstance.current?.write(data);
+      if (!isDisposedRef.current && terminalInstance.current) {
+        terminalInstance.current.write(data);
+      }
     },
     clear: () => {
-      if (!isDisposedRef.current) {
-        terminalInstance.current?.clear();
-        terminalInstance.current?.write('\x1b[2J\x1b[H');
+      if (!isDisposedRef.current && terminalInstance.current) {
+        terminalInstance.current.clear();
+        terminalInstance.current.write('\x1b[2J\x1b[H');
       }
     },
     focus: () => {
-      if (!isDisposedRef.current) terminalInstance.current?.focus();
+      if (!isDisposedRef.current && terminalInstance.current) {
+        terminalInstance.current.focus();
+      }
     },
   }));
   useEffect(() => {
@@ -53,21 +57,24 @@ export const XtermView = forwardRef<XtermRef, XtermViewProps>(({ onData, classNa
     terminalInstance.current = term;
     fitAddonInstance.current = fit;
     const performFit = () => {
-      if (isDisposedRef.current || !containerRef.current || !fitAddonInstance.current || !terminalInstance.current) return;
+      if (
+        isDisposedRef.current || 
+        !containerRef.current || 
+        !fitAddonInstance.current || 
+        !terminalInstance.current ||
+        !(terminalInstance.current as any)._core // Internal check for core initialization
+      ) return;
       try {
-        // Fix for "Cannot read properties of undefined (reading 'dimensions')"
-        // Ensure terminal is opened, has an element, and container is in DOM with size
         const termElement = (terminalInstance.current as any).element;
         if (
-          termElement && 
+          termElement &&
           document.contains(containerRef.current) &&
-          containerRef.current.clientWidth > 0 && 
+          containerRef.current.clientWidth > 0 &&
           containerRef.current.clientHeight > 0
         ) {
           fitAddonInstance.current.fit();
         }
       } catch (e) {
-        // Silently catch fit errors to prevent app crash
         console.warn('Xterm fit attempt skipped:', e);
       }
     };

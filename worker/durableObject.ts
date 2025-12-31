@@ -130,7 +130,6 @@ export class GlobalDurableObject extends DurableObject<Env> {
             await this.handleBuiltin(ws, command);
             return;
         }
-        // Fallback to Workers AI for non-builtin or natural language
         await this.handleAICommand(ws, command);
     }
     private async handleAICommand(ws: WebSocket, command: string) {
@@ -139,15 +138,14 @@ export class GlobalDurableObject extends DurableObject<Env> {
         ws.send(`\x1b[90m>> RELAYING TO NEURAL CORE...\x1b[0m\r\n`);
         const fsSummary = root.children?.map(c => `${c.name} (${c.type})`).join(', ') || 'empty';
         const aiMessages: ChatMessage[] = [
-            { 
-                role: 'system', 
-                content: `${config.systemPrompt}\n\nEnvironment context:\n- CWD: ${config.cwd}\n- FS: [${fsSummary}]\n- Role: ${config.agentType}\n\nRules: If you want to modify files, use tags like [[touch filename]] or [[echo "text" > file]]. Keep responses concise.` 
+            {
+                role: 'system',
+                content: `${config.systemPrompt}\n\nEnvironment context:\n- CWD: ${config.cwd}\n- FS: [${fsSummary}]\n- Role: ${config.agentType}\n\nRules: If you want to modify files, use tags like [[touch filename]] or [[echo "text" > file]]. Keep responses concise.`
             },
             ...this.history.slice(-4),
             { role: 'user', content: command }
         ];
         try {
-            // Check if AI binding exists on env
             const ai = (this.env as any).AI as AIEnv;
             if (!ai) {
                 ws.send(`\x1b[31m[ERROR] AI Core unavailable. Use 'help' for builtins.\x1b[0m\r\n`);
@@ -155,11 +153,9 @@ export class GlobalDurableObject extends DurableObject<Env> {
             }
             const result = await ai.run('@cf/meta/llama-3-8b-instruct', { messages: aiMessages });
             const response = result.response;
-            // Update history
             this.history.push({ role: 'user', content: command });
             this.history.push({ role: 'assistant', content: response });
             if (this.history.length > 10) this.history = this.history.slice(-10);
-            // Handle AI Tool Calls (Syntactic Sugar)
             const toolRegex = /\[\[(.*?)\]\]/g;
             let match;
             let finalOutput = response;
@@ -182,10 +178,11 @@ export class GlobalDurableObject extends DurableObject<Env> {
         const root = await this.ctx.storage.get<FileSystemItem>("fs_root") || { name: '/', type: 'dir', children: [] };
         const config = await this.ensureConfig();
         switch (cmd) {
-            case 'ls':
+            case 'ls': {
                 const out = root.children?.map(i => i.type === 'dir' ? `\x1b[1;34m${i.name}/\x1b[0m` : i.name).join('  ');
                 ws.send(`${out || 'empty'}\r\n`);
                 break;
+            }
             case 'mkdir':
                 if (args[0]) {
                     root.children?.push({ name: args[0], type: 'dir', children: [] });
@@ -200,7 +197,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
                     if (!silent) ws.send(`Created file: ${args[0]}\r\n`);
                 }
                 break;
-            case 'rm':
+            case 'rm': {
                 const idx = root.children?.findIndex(f => f.name === args[0]) ?? -1;
                 if (idx > -1) {
                     root.children?.splice(idx, 1);
@@ -208,11 +205,13 @@ export class GlobalDurableObject extends DurableObject<Env> {
                     if (!silent) ws.send(`Removed ${args[0]}\r\n`);
                 }
                 break;
-            case 'cat':
+            }
+            case 'cat': {
                 const file = root.children?.find(f => f.name === args[0]);
                 if (file) ws.send(`${file.content || '(empty)'}\r\n`);
                 else ws.send(`cat: ${args[0]}: No such file\r\n`);
                 break;
+            }
             case 'whoami':
                 ws.send(`NODE: ${config.name}\r\nPERSONA: ${config.agentType}\r\n`);
                 break;
@@ -222,12 +221,13 @@ export class GlobalDurableObject extends DurableObject<Env> {
             case 'clear':
                 ws.send('\x1b[2J\x1b[H');
                 break;
-            case 'cd':
+            case 'cd': {
                 const path = args[0] || '/';
                 const updated = { ...config, cwd: path };
                 await this.ctx.storage.put("config", updated);
                 this.config = updated;
                 break;
+            }
         }
     }
 }
