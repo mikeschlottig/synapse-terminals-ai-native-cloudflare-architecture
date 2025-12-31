@@ -12,6 +12,22 @@ export interface TerminalConfig {
   systemPrompt: string;
   status: 'online' | 'offline';
   cwd: string;
+  isSystemNode?: boolean;
+}
+export interface InterNodeMessage {
+  from: string;
+  to: string;
+  type: 'command' | 'status' | 'data';
+  payload: {
+    command?: string;
+    data?: any;
+  };
+}
+export interface MeshStats {
+  totalNodes: number;
+  activeConnections: number;
+  avgLatency: number;
+  systemHealth: number;
 }
 export interface ExecutionRequest {
   prompt: string;

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import type { TerminalConfig, ExecutionRequest, AgentType, ApiResponse, FileSystemItem } from '@shared/types';
+import type { TerminalConfig, AgentType, ApiResponse, FileSystemItem, InterNodeMessage } from '@shared/types';
 import { Env } from "./core-utils";
 export class GlobalDurableObject extends DurableObject<Env> {
     private sessions: Set<WebSocket> = new Set();
@@ -20,9 +20,9 @@ export class GlobalDurableObject extends DurableObject<Env> {
             agentType: 'system',
             systemPrompt: "You are a helpful Synapse system agent.",
             status: 'online',
-            cwd: '/'
+            cwd: '/',
+            isSystemNode: false
         };
-        // Initialize root file system
         const rootFS: FileSystemItem = {
             name: '/',
             type: 'dir',
@@ -46,10 +46,7 @@ export class GlobalDurableObject extends DurableObject<Env> {
             const pair = new WebSocketPair();
             const [client, server] = [pair[0], pair[1]];
             await this.handleWebSocket(server);
-            return new Response(null, {
-                status: 101,
-                webSocket: client,
-            });
+            return new Response(null, { status: 101, webSocket: client });
         }
         if (url.pathname.includes('/config')) {
             if (request.method === 'GET') {
@@ -65,6 +62,14 @@ export class GlobalDurableObject extends DurableObject<Env> {
                 this.broadcast(`\r\n\x1b[35m[SYSTEM] Configuration updated: ${updated.agentType} mode active.\x1b[0m\r\n\x1b[32muser@synapse:${updated.cwd}$ \x1b[0m`);
                 return Response.json({ success: true, data: updated } satisfies ApiResponse<TerminalConfig>);
             }
+        }
+        if (url.pathname.includes('/execute') && request.method === 'POST') {
+            const msg = await request.json() as InterNodeMessage;
+            const config = await this.ensureConfig();
+            return Response.json({ 
+                success: true, 
+                data: `[${config.name}] Processed remote command: "${msg.payload.command}" from node ${msg.from}` 
+            });
         }
         return new Response('Not Found', { status: 404 });
     }
@@ -105,41 +110,95 @@ export class GlobalDurableObject extends DurableObject<Env> {
     private async processCommand(ws: WebSocket, command: string) {
         if (!command) return;
         const config = await this.ensureConfig();
+        if (command.startsWith('@')) {
+            const parts = command.slice(1).split(' ');
+            const target = parts[0];
+            const remoteCmd = parts.slice(1).join(' ');
+            ws.send(`\x1b[36m[ROUTING]\x1b[0m Forwarding to node: ${target}...\r\n`);
+            try {
+                const stub = this.env.GlobalDurableObject.get(this.env.GlobalDurableObject.idFromName(target));
+                const res = await stub.fetch(new Request(`http://do/execute`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        from: config.id,
+                        to: target,
+                        type: 'command',
+                        payload: { command: remoteCmd }
+                    } satisfies InterNodeMessage)
+                }));
+                const result = await res.json() as ApiResponse<string>;
+                ws.send(`\x1b[34m[REMOTE]\x1b[0m ${result.data}\r\n`);
+            } catch (e) {
+                ws.send(`\x1b[31m[ERROR]\x1b[0m Routing failed: ${target} unreachable.\r\n`);
+            }
+            return;
+        }
         const parts = command.split(' ');
         const cmd = parts[0];
         const args = parts.slice(1);
         switch (cmd) {
+            case 'cd': {
+                const path = args[0] || '/';
+                if (path === '/') config.cwd = '/';
+                else if (path === '..') {
+                    const parts = config.cwd.split('/').filter(Boolean);
+                    parts.pop();
+                    config.cwd = '/' + parts.join('/');
+                } else {
+                    config.cwd = (config.cwd === '/' ? '' : config.cwd) + '/' + path;
+                }
+                await this.ctx.storage.put("config", config);
+                this.config = config;
+                break;
+            }
+            case 'mkdir': {
+                const name = args[0];
+                if (!name) return ws.send('Usage: mkdir <name>\r\n');
+                const root = await this.ctx.storage.get<FileSystemItem>("fs_root");
+                if (root?.children) {
+                    root.children.push({ name, type: 'dir', children: [] });
+                    await this.ctx.storage.put("fs_root", root);
+                    ws.send(`Created directory: ${name}\r\n`);
+                }
+                break;
+            }
+            case 'touch': {
+                const name = args[0];
+                if (!name) return ws.send('Usage: touch <name>\r\n');
+                const root = await this.ctx.storage.get<FileSystemItem>("fs_root");
+                if (root?.children) {
+                    root.children.push({ name, type: 'file', content: '' });
+                    await this.ctx.storage.put("fs_root", root);
+                    ws.send(`Created file: ${name}\r\n`);
+                }
+                break;
+            }
             case 'ls': {
                 const root = await this.ctx.storage.get<FileSystemItem>("fs_root");
                 if (root?.children) {
-                    const output = root.children.map(item => 
+                    const output = root.children.map(item =>
                         item.type === 'dir' ? `\x1b[34m${item.name}/\x1b[0m` : item.name
                     ).join('  ');
                     ws.send(output + '\r\n');
                 }
                 break;
             }
-            case 'pwd': {
+            case 'pwd':
                 ws.send(`${config.cwd}\r\n`);
                 break;
-            }
-            case 'whoami': {
+            case 'whoami':
                 ws.send(`\x1b[36mNODE IDENTITY\x1b[0m\r\nID: ${this.ctx.id.toString()}\r\nRole: ${config.agentType}\r\n`);
                 break;
-            }
-            case 'help': {
-                ws.send('\x1b[36mCommands:\x1b[0m ls, pwd, whoami, clear, help\r\n');
+            case 'help':
+                ws.send('\x1b[36mCommands:\x1b[0m cd, mkdir, touch, ls, pwd, whoami, @[id], clear, help\r\n');
                 break;
-            }
-            case 'clear': {
+            case 'clear':
                 ws.send('\x1b[2J\x1b[H');
                 break;
-            }
-            default: {
+            default:
                 ws.send(`\x1b[33m[${config.agentType.toUpperCase()}]\x1b[0m Executing: ${command}...\r\n`);
-                await new Promise(r => setTimeout(r, 600));
+                await new Promise(r => setTimeout(r, 400));
                 ws.send(`Command execution successful.\r\n`);
-            }
         }
     }
 }
