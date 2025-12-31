@@ -25,6 +25,7 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loadLevel, setLoadLevel] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const xtermRef = useRef<XtermRef>(null);
   const reconnectTimeoutRef = useRef<any>(null);
@@ -43,8 +44,8 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
     fetchConfig();
     const interval = setInterval(() => {
       setLoadLevel(prev => {
-        const base = isProcessing ? 60 : (Math.sin(Date.now() / 5000) * 10 + 15);
-        const jitter = Math.random() * (isProcessing ? 15 : 5);
+        const base = isProcessingRef.current ? 60 : (Math.sin(Date.now() / 5000) * 10 + 15);
+        const jitter = Math.random() * (isProcessingRef.current ? 15 : 5);
         return Math.floor(Math.max(2, Math.min(99, base + jitter)));
       });
     }, 1000);
@@ -91,7 +92,11 @@ export function TerminalInterface({ terminalId, name, compact = false }: Termina
         wsRef.current = null;
       }
     };
-  }, [terminalId, fetchConfig, isProcessing]);
+  }, [terminalId, fetchConfig]);
+  
+  useEffect(() => {
+    isProcessingRef.current = isProcessing;
+  }, [isProcessing]);
   const handleData = useCallback((data: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(data);
