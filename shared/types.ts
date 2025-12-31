@@ -13,6 +13,13 @@ export interface TerminalConfig {
   status: 'online' | 'offline';
   cwd: string;
   isSystemNode?: boolean;
+  lastActive?: string;
+}
+export interface MeshNode {
+  id: string;
+  name: string;
+  type: AgentType;
+  createdAt: string;
 }
 export interface InterNodeMessage {
   from: string;
@@ -28,6 +35,7 @@ export interface MeshStats {
   activeConnections: number;
   avgLatency: number;
   systemHealth: number;
+  messageCount?: number;
 }
 export interface ExecutionRequest {
   prompt: string;
